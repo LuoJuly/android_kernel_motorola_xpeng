@@ -1,4 +1,2 @@
 # SPDX-License-Identifier: GPL-2.0-only
-# ignore all subdirs except stub
-!/stub/
-*/
+# Techpack modules kept in-tree (merged from Davi0293/kernel_testing Android-12)
