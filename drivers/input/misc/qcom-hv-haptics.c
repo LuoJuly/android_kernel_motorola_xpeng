@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0-only
 /*
  * Copyright (c) 2020-2021, The Linux Foundation. All rights reserved.
- * Copyright (c) 2022 Qualcomm Innovation Center, Inc. All rights reserved.
+ * Copyright (c) 2022-2023, Qualcomm Innovation Center, Inc. All rights reserved.
  */
 
 #include <linux/atomic.h>
@@ -549,7 +549,6 @@ struct haptics_reg_info {
 
 int haptic_gpio;
 u32 long_gain_reduced;
-static int haptics_load_constant_effect(struct haptics_chip *chip, u8 amplitude);
 static inline int get_max_fifo_samples(struct haptics_chip *chip)
 {
 	int val = 0;
@@ -1428,7 +1427,6 @@ static int haptics_wait_hboost_ready(struct haptics_chip *chip)
 
 	if (i == HBOOST_WAIT_READY_COUNT) {
 		dev_err(chip->dev, "hboost is not ready for haptics play\n");
-		haptics_load_constant_effect(chip, 255);
 		return -EBUSY;
 	}
 
@@ -2105,9 +2103,6 @@ static int haptics_load_constant_effect(struct haptics_chip *chip, u8 amplitude)
 		goto unlock;
 
 	/* Always enable LRA auto resonance for DIRECT_PLAY */
-	rc = haptics_masked_write(chip, chip->cfg_addr_base,
-			HAP_CFG_AUTORES_CFG_REG, AUTORES_EN_DLY_MASK,
-			AUTORES_EN_DLY_6_CYCLES << AUTORES_EN_DLY_SHIFT);
 	rc = haptics_enable_autores(chip, !chip->config.is_erm);
 	if (rc < 0)
 		goto unlock;
@@ -3074,6 +3069,11 @@ static ssize_t pattern_s_dbgfs_write(struct file *fp,
 			goto exit;
 		}
 
+		if (i >= ARRAY_SIZE(tmp)) {
+			pr_err("too many patterns in input string\n");
+			rc = -EINVAL;
+			goto exit;
+		}
 		tmp[i++] = val;
 	}
 

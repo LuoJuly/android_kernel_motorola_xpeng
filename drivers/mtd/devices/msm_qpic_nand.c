@@ -2,6 +2,7 @@
 /*
  * Copyright (C) 2007 Google, Inc.
  * Copyright (c) 2012-2021 The Linux Foundation. All rights reserved.
+ * Copyright (c) Qualcomm Technologies, Inc. and/or its subsidiaries.
  */
 
 #include "msm_qpic_nand.h"
@@ -18,8 +19,24 @@
 #define SMEM_AARM_PARTITION_TABLE 9
 #define SMEM_APPS 0
 #define ONE_CODEWORD_SIZE 516
+#define ACTIVE_BOOT_PART_MAX 30
 
 static struct device *dev_node;
+static char active_boot_part[ACTIVE_BOOT_PART_MAX] = "boot";
+
+/*
+ * Function to get the active boot partition information
+ * from kernel command line during system boot.
+ */
+#ifndef MODULE
+static int __init get_active_boot_part(char *str)
+{
+	strlcpy(active_boot_part, str, ACTIVE_BOOT_PART_MAX);
+	return 0;
+}
+
+__setup("part.activeboot=", get_active_boot_part);
+#endif
 
 /*
  * Get the DMA memory for requested amount of size. It returns the pointer
@@ -214,20 +231,27 @@ static void msm_nand_print_rpm_info(struct device *dev)
 static int msm_nand_suspend(struct device *dev)
 {
 	int ret = 0;
+	struct msm_nand_info *info = dev_get_drvdata(dev);
+
+	mutex_lock(&info->lock);
 
 	if (!pm_runtime_suspended(dev))
 		ret = msm_nand_runtime_suspend(dev);
 
+	mutex_unlock(&info->lock);
 	return ret;
 }
 
 static int msm_nand_resume(struct device *dev)
 {
 	int ret = 0;
+	struct msm_nand_info *info = dev_get_drvdata(dev);
 
+	mutex_lock(&info->lock);
 	if (!pm_runtime_suspended(dev))
 		ret = msm_nand_runtime_resume(dev);
 
+	mutex_unlock(&info->lock);
 	return ret;
 }
 #else
@@ -797,18 +821,25 @@ static int msm_nand_flash_onfi_probe(struct msm_nand_info *info)
 
 	memset(&data, 0, sizeof(struct msm_nand_flash_onfi_data));
 
-	/* Lookup the partition to which apps has access to */
+	/* Lookup the partition to which apps has access to
+	 *
+	 * active_boot_part value gets updated to either kernel command line
+	 * parameter "part.activeboot=" value (if present) or hold the default
+	 * "boot" value.
+	 */
 	for (i = 0; i < FLASH_PTABLE_MAX_PARTS_V4; i++) {
-		if (mtd_part[i].name && !strcmp("boot", mtd_part[i].name)) {
+		if (mtd_part[i].name && !strcmp(active_boot_part, mtd_part[i].name)) {
 			page_address = mtd_part[i].offset << 6;
 			break;
 		}
 	}
+
 	if (!page_address) {
 		pr_err("%s: no apps partition found in smem\n", __func__);
 		ret = -EPERM;
 		goto free_dma;
 	}
+
 	data.cfg.cmd = MSM_NAND_CMD_PAGE_READ_ONFI;
 	data.exec = 1;
 	data.cfg.addr0 = (page_address << 16) |
@@ -1913,7 +1944,7 @@ free_dma:
 			if (last_pos < ecc_bytes_percw_in_bits)
 				num_zero_bits++;
 
-			if (num_zero_bits > 4) {
+			if (num_zero_bits > info->flash_dev.ecc_capability) {
 				*erased_page = false;
 				goto free_mem;
 			}
@@ -1924,8 +1955,8 @@ free_dma:
 		num_zero_bits = last_pos = next_pos = 0;
 		ecc_temp += chip->ecc_parity_bytes;
 	}
-
-	if ((n == cwperpage) && (num_zero_bits <= 4))
+	if ((n == cwperpage) &&
+	    (num_zero_bits <= info->flash_dev.ecc_capability))
 		*erased_page = true;
 free_mem:
 	kfree(ecc);
@@ -2132,6 +2163,33 @@ static int msm_nand_read_pagescope(struct mtd_info *mtd, loff_t from,
 			goto free_dma;
 		/* Check for flash status errors */
 		pageerr = rawerr = 0;
+
+		/*
+		 * PAGE_ERASED bit will set only if all
+		 * CODEWORD_ERASED bit of all codewords
+		 * of the page is set.
+		 *
+		 * PAGE_ERASED bit is a 'logical and' of all
+		 * CODEWORD_ERASED bit of all codewords i.e.
+		 * even if one codeword is detected as not
+		 * an erased codeword, PAGE_ERASED bit will unset.
+		 */
+		for (n = rw_params.start_sector; n < cwperpage; n++) {
+			if ((dma_buffer->result[n].erased_cw_status &
+					(1 << PAGE_ERASED)) &&
+					(dma_buffer->result[n].buffer_status &
+					 NUM_ERRORS)) {
+				err = msm_nand_is_erased_page_ps(mtd,
+						from, ops,
+						&rw_params,
+						&erased_page);
+				if (err)
+					goto free_dma;
+				if (erased_page)
+					rawerr = -EIO;
+				break;
+			}
+		}
 		for (n = rw_params.start_sector; n < cwperpage; n++) {
 			if (dma_buffer->result[n].flash_status & (FS_OP_ERR |
 					FS_MPU_ERR)) {
@@ -2523,7 +2581,7 @@ free_dma:
 			if (last_pos < ecc_bytes_percw_in_bits)
 				num_zero_bits++;
 
-			if (num_zero_bits > 4) {
+			if (num_zero_bits > info->flash_dev.ecc_capability) {
 				*erased_page = false;
 				goto free_mem;
 			}
@@ -2535,7 +2593,8 @@ free_dma:
 		ecc_temp += chip->ecc_parity_bytes;
 	}
 
-	if ((n == cwperpage) && (num_zero_bits <= 4))
+	if ((n == cwperpage) &&
+	    (num_zero_bits <= info->flash_dev.ecc_capability))
 		*erased_page = true;
 free_mem:
 	kfree(ecc);
@@ -2729,6 +2788,33 @@ static int msm_nand_read_oob(struct mtd_info *mtd, loff_t from,
 			goto free_dma;
 		/* Check for flash status errors */
 		pageerr = rawerr = 0;
+
+		/*
+		 * PAGE_ERASED bit will set only if all
+		 * CODEWORD_ERASED bit of all codewords
+		 * of the page is set.
+		 *
+		 * PAGE_ERASED bit is a 'logical and' of all
+		 * CODEWORD_ERASED bit of all codewords i.e.
+		 * even if one codeword is detected as not
+		 * an erased codeword, PAGE_ERASED bit will unset.
+		 */
+		for (n = rw_params.start_sector; n < cwperpage; n++) {
+			if ((dma_buffer->result[n].erased_cw_status &
+					(1 << PAGE_ERASED)) &&
+					(dma_buffer->result[n].buffer_status &
+					 NUM_ERRORS)) {
+				err = msm_nand_is_erased_page(mtd,
+						from, ops,
+						&rw_params,
+						&erased_page);
+				if (err)
+					goto free_dma;
+				if (erased_page)
+					rawerr = -EIO;
+				break;
+			}
+		}
 		for (n = rw_params.start_sector; n < cwperpage; n++) {
 			if (dma_buffer->result[n].flash_status & (FS_OP_ERR |
 					FS_MPU_ERR)) {
@@ -4346,6 +4432,15 @@ static int msm_nand_bam_panic_notifier(struct notifier_block *this,
 	struct msm_nand_info *info = dev_get_drvdata(dev_node);
 	struct msm_nand_chip *chip = &info->nand_chip;
 	int err;
+
+	/* We shouldn't request for a new resource during panic
+	 * as the cores and irq's were already in disabled state.
+	 * So, check device runtime status before request for a
+	 * resource (clock and bus).
+	 */
+
+	if (pm_runtime_suspended(chip->dev))
+		return NOTIFY_DONE;
 
 	err = msm_nand_get_device(chip->dev);
 	if (err)
