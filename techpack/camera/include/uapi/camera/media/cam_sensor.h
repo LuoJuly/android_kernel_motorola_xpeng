@@ -137,13 +137,6 @@ struct cam_cmd_ois_info {
 	__u8                  cmd_type;
 	__u8                  ois_fw_flag;
 	__u8                  is_ois_calib;
-	__u8                  ois_preprog_flag;
-	__u8                  ois_precoeff_flag;
-	__u8                  ois_postcalib_flag;
-	__u8                  ois_fw_txn_data_sz;
-	__u8                  ois_fw_inc_addr;
-	__u8                  ois_fw_addr_type;
-	__u8                  ois_fw_data_type;
 	char                  ois_name[MAX_OIS_NAME_SIZE];
 	struct cam_ois_opcode opcode;
 } __attribute__((packed));
@@ -172,15 +165,6 @@ struct cam_cmd_probe {
 	__u32    data_mask;
 	__u16    camera_id;
 	__u16    reserved;
-	__u8   probe_sub_device;
-	__u32  sub_device_addr;
-	__u8   sub_device_data_type;
-	__u8   sub_device_addr_type;
-	__u32  sub_device_id_addr;
-	__u32  expected_sub_device_id;
-	__u8   sub_device_cci_master;
-	__u8   sub_device_cci_device;
-	__u8   sub_device_i2c_freq_mode;
 } __attribute__((packed));
 
 /**

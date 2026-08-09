@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0-only
 /*
  * Copyright (c) 2017-2021, The Linux Foundation. All rights reserved.
+ * Copyright (c) 2023-2024 Qualcomm Innovation Center, Inc. All rights reserved.
  */
 
 #include <linux/module.h>
@@ -154,7 +155,7 @@ static int32_t cam_sensor_i2c_pkt_parse(struct cam_sensor_ctrl_t *s_ctrl,
 	csl_packet = (struct cam_packet *)(generic_ptr +
 		(uint32_t)config.offset);
 
-	if ((csl_packet == NULL) || cam_packet_util_validate_packet(csl_packet,
+	if (cam_packet_util_validate_packet(csl_packet,
 		remain_len)) {
 		CAM_ERR(CAM_SENSOR, "Invalid packet params");
 		rc = -EINVAL;
@@ -336,6 +337,7 @@ static int32_t cam_sensor_i2c_pkt_parse(struct cam_sensor_ctrl_t *s_ctrl,
 	}
 
 end:
+	cam_mem_put_cpu_buf(config.packet_handle);
 	return rc;
 }
 
@@ -444,17 +446,6 @@ int32_t cam_sensor_update_slave_info(struct cam_cmd_probe *probe_info,
 
 	s_ctrl->sensor_probe_addr_type =  probe_info->addr_type;
 	s_ctrl->sensor_probe_data_type =  probe_info->data_type;
-
-	s_ctrl->probe_sub_device          =  probe_info->probe_sub_device;
-	s_ctrl->sub_device_addr           =  probe_info->sub_device_addr;
-	s_ctrl->sub_device_data_type      =  probe_info->sub_device_data_type;
-	s_ctrl->sub_device_addr_type      =  probe_info->sub_device_addr_type;
-	s_ctrl->sub_device_id_addr        =  probe_info->sub_device_id_addr;
-	s_ctrl->expected_sub_device_id    =  probe_info->expected_sub_device_id;
-	s_ctrl->sub_device_cci_master     =  probe_info->sub_device_cci_master;
-	s_ctrl->sub_device_cci_device     =  probe_info->sub_device_cci_device;
-	s_ctrl->sub_device_i2c_freq_mode  =  probe_info->sub_device_i2c_freq_mode;
-
 	CAM_DBG(CAM_SENSOR,
 		"Sensor Addr: 0x%x sensor_id: 0x%x sensor_mask: 0x%x sensor_pipeline_delay:0x%x",
 		s_ctrl->sensordata->slave_info.sensor_id_reg_addr,
@@ -564,6 +555,10 @@ int32_t cam_handle_mem_ptr(uint64_t handle, struct cam_sensor_ctrl_t *s_ctrl)
 	}
 
 	for (i = 0; i < pkt->num_cmd_buf; i++) {
+		rc = cam_packet_util_validate_cmd_desc(&cmd_desc[i]);
+		if (rc)
+			return rc;
+
 		if (!(cmd_desc[i].length))
 			continue;
 		rc = cam_mem_get_cpu_buf(cmd_desc[i].mem_handle,
@@ -576,6 +571,7 @@ int32_t cam_handle_mem_ptr(uint64_t handle, struct cam_sensor_ctrl_t *s_ctrl)
 		if (cmd_desc[i].offset >= len) {
 			CAM_ERR(CAM_SENSOR,
 				"offset past length of buffer");
+			cam_mem_put_cpu_buf(cmd_desc[i].mem_handle);
 			rc = -EINVAL;
 			goto end;
 		}
@@ -583,6 +579,7 @@ int32_t cam_handle_mem_ptr(uint64_t handle, struct cam_sensor_ctrl_t *s_ctrl)
 		if (cmd_desc[i].length > remain_len) {
 			CAM_ERR(CAM_SENSOR,
 				"Not enough buffer provided for cmd");
+			cam_mem_put_cpu_buf(cmd_desc[i].mem_handle);
 			rc = -EINVAL;
 			goto end;
 		}
@@ -595,11 +592,14 @@ int32_t cam_handle_mem_ptr(uint64_t handle, struct cam_sensor_ctrl_t *s_ctrl)
 		if (rc < 0) {
 			CAM_ERR(CAM_SENSOR,
 				"Failed to parse the command Buffer Header");
+			cam_mem_put_cpu_buf(cmd_desc[i].mem_handle);
 			goto end;
 		}
+		cam_mem_put_cpu_buf(cmd_desc[i].mem_handle);
 	}
 
 end:
+	cam_mem_put_cpu_buf(handle);
 	return rc;
 }
 
@@ -714,124 +714,18 @@ int cam_sensor_match_id(struct cam_sensor_ctrl_t *s_ctrl)
 	return rc;
 }
 
-int cam_sensor_match_sub_device_id(struct cam_sensor_ctrl_t *s_ctrl)
-{
-	int rc = 0;
-	int ret = 0;
-	uint32_t sub_device_id = 0;
-	uint16_t sensor_address = 0;
-	uint16_t sensor_freq_mode = 0;
-	uint8_t sensor_cci_master = 0;
-	uint8_t sensor_cci_device = 0;
-
-	/* if hal doesn't config ProbeSubDevice parameter in sensor xml, return success immediately */
-	if (!s_ctrl->probe_sub_device) {
-		return 0;
-	}
-
-	/* save sensor i2c address */
-	sensor_address = s_ctrl->io_master_info.cci_client->sid;
-
-	/* set sub-device i2c address */
-	if (s_ctrl->sub_device_addr) {
-		s_ctrl->io_master_info.cci_client->sid = s_ctrl->sub_device_addr >> 1;
-	}
-
-	/*if need change cci master*/
-	if (s_ctrl->need_change_cci_master) {
-		sensor_cci_master = s_ctrl->io_master_info.cci_client->cci_i2c_master;
-		sensor_freq_mode = s_ctrl->io_master_info.cci_client->i2c_freq_mode;
-		sensor_cci_device = s_ctrl->io_master_info.cci_client->cci_device;
-
-		ret = camera_io_release(&(s_ctrl->io_master_info));
-		if (ret != 0) {
-			CAM_ERR(CAM_SENSOR, "release sensor cci failed!");
-		}
-
-		s_ctrl->io_master_info.cci_client->cci_i2c_master = s_ctrl->sub_device_cci_master;
-		s_ctrl->io_master_info.cci_client->i2c_freq_mode = s_ctrl->sub_device_i2c_freq_mode;
-
-		if(s_ctrl->io_master_info.cci_client->cci_device != s_ctrl->sub_device_cci_device)
-		{
-			s_ctrl->io_master_info.cci_client->cci_device = s_ctrl->sub_device_cci_device;
-		}
-		rc = camera_io_init(&(s_ctrl->io_master_info));
-		if(rc != 0) {
-			ret = camera_io_release(&(s_ctrl->io_master_info));
-			CAM_ERR(CAM_SENSOR, "init sensor cci failed! rc=%d, release ret=%d, try again!", rc, ret);
-			usleep_range(100000, 100000);
-			rc = camera_io_init(&(s_ctrl->io_master_info));
-				if (rc != 0) {
-					ret = camera_io_release(&(s_ctrl->io_master_info));
-				CAM_ERR(CAM_SENSOR, "try again init sensor cci failed again! rc=%d, release ret=%d", rc, ret);
-			}
-		}
-	}
-
-	rc = camera_io_dev_read(
-		&(s_ctrl->io_master_info),
-		s_ctrl->sub_device_id_addr,
-		&sub_device_id,
-		s_ctrl->sub_device_addr_type,
-		s_ctrl->sub_device_data_type);
-
-	CAM_INFO(CAM_SENSOR, "Read sub device id: 0x%x expected sub device id 0x%x:",
-		sub_device_id, s_ctrl->expected_sub_device_id);
-
-	/* restore sensor i2c address */
-	s_ctrl->io_master_info.cci_client->sid = sensor_address;
-
-	/* reset cci master */
-	if (s_ctrl->need_change_cci_master) {
-		ret = camera_io_release(&(s_ctrl->io_master_info));
-		if (ret != 0) {
-			CAM_ERR(CAM_SENSOR, "release flash cci failed! ");
-		}
-
-		s_ctrl->io_master_info.cci_client->cci_i2c_master = sensor_cci_master;
-		s_ctrl->io_master_info.cci_client->i2c_freq_mode = sensor_freq_mode;
-		s_ctrl->io_master_info.cci_client->cci_device = sensor_cci_device;
-
-		rc = camera_io_init(&(s_ctrl->io_master_info));
-		if(rc != 0) {
-			ret = camera_io_release(&(s_ctrl->io_master_info));
-			CAM_ERR(CAM_SENSOR, "init sensor cci failed! rc=%d, release ret=%d, try again!", rc, ret);
-			usleep_range(100000, 100000);
-			rc = camera_io_init(&(s_ctrl->io_master_info));
-			if (rc != 0) {
-				ret = camera_io_release(&(s_ctrl->io_master_info));
-				CAM_ERR(CAM_SENSOR, "try again init sensor cci failed again! rc=%d, release ret=%d", rc, ret);
-			}
-		}
-	}
-
-	if (sub_device_id == s_ctrl->expected_sub_device_id) {
-		CAM_INFO(CAM_SENSOR,
-			"Probe sub device success,slot:%d,sub_device_addr:0x%x,sub_device_id:0x%x",
-			s_ctrl->soc_info.index,
-			s_ctrl->sub_device_addr,
-			s_ctrl->expected_sub_device_id);
-		rc = 0;
-	}
-	else {
-		CAM_ERR(CAM_SENSOR, "Probe sub device fail");
-		rc = -EINVAL;
-	}
-
-	return rc;
-}
-
 int32_t cam_sensor_driver_cmd(struct cam_sensor_ctrl_t *s_ctrl,
 	void *arg)
 {
 	int rc = 0, pkt_opcode = 0;
 	struct cam_control *cmd = (struct cam_control *)arg;
-	struct cam_sensor_power_ctrl_t *power_info =
-		&s_ctrl->sensordata->power_info;
+	struct cam_sensor_power_ctrl_t *power_info = NULL;
 	if (!s_ctrl || !arg) {
 		CAM_ERR(CAM_SENSOR, "s_ctrl is NULL");
 		return -EINVAL;
 	}
+
+	power_info = &s_ctrl->sensordata->power_info;
 
 	if (cmd->op_code != CAM_SENSOR_PROBE_CMD) {
 		if (cmd->handle_type != CAM_HANDLE_USER_POINTER) {
@@ -903,14 +797,6 @@ int32_t cam_sensor_driver_cmd(struct cam_sensor_ctrl_t *s_ctrl,
 			goto free_power_settings;
 		}
 
-		/* Match sub-device ID */
-		rc = cam_sensor_match_sub_device_id(s_ctrl);
-		if (rc < 0) {
-			cam_sensor_power_down(s_ctrl);
-			usleep_range(20000,20000);
-			goto free_power_settings;
-		}
-
 		CAM_INFO(CAM_SENSOR,
 			"Probe success,slot:%d,slave_addr:0x%x,sensor_id:0x%x",
 			s_ctrl->soc_info.index,
@@ -965,6 +851,11 @@ int32_t cam_sensor_driver_cmd(struct cam_sensor_ctrl_t *s_ctrl,
 
 		sensor_acq_dev.device_handle =
 			cam_create_device_hdl(&bridge_params);
+		if (sensor_acq_dev.device_handle <= 0) {
+			rc = -EFAULT;
+			CAM_ERR(CAM_SENSOR, "Can not create device handle");
+			goto release_mutex;
+		}
 		s_ctrl->bridge_intf.device_hdl = sensor_acq_dev.device_handle;
 		s_ctrl->bridge_intf.session_hdl = sensor_acq_dev.session_handle;
 
