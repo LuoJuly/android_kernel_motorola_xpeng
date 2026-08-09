@@ -1467,3 +1467,48 @@ SND_SOC_DAILINK_DEFS(voicemmode2_hostless,
 	DAILINK_COMP_ARRAY(COMP_CPU("VoiceMMode2")),
 	DAILINK_COMP_ARRAY(COMP_CODEC("snd-soc-dummy", "snd-soc-dummy-dai")),
 	DAILINK_COMP_ARRAY(COMP_PLATFORM("msm-pcm-hostless")));
+
+SND_SOC_DAILINK_DEFS(pri_mi2s_rx_aw882xx,
+        DAILINK_COMP_ARRAY(COMP_CPU("msm-dai-q6-mi2s.0")),
+        DAILINK_COMP_ARRAY(COMP_CODEC("aw882xx_codec", "aw882xx-aif")),
+        DAILINK_COMP_ARRAY(COMP_PLATFORM("msm-pcm-routing")));
+
+SND_SOC_DAILINK_DEFS(pri_mi2s_tx_aw882xx,
+        DAILINK_COMP_ARRAY(COMP_CPU("msm-dai-q6-mi2s.1")),
+        DAILINK_COMP_ARRAY(COMP_CODEC("aw882xx_codec", "aw882xx-aif")),
+        DAILINK_COMP_ARRAY(COMP_PLATFORM("msm-pcm-routing")));
+
+SND_SOC_DAILINK_DEFS(sen_mi2s_rx_aw882xx,
+	DAILINK_COMP_ARRAY(COMP_CPU("msm-dai-q6-mi2s.10")),
+	DAILINK_COMP_ARRAY(COMP_CODEC("aw882xx_codec", "aw882xx-aif")),
+	DAILINK_COMP_ARRAY(COMP_PLATFORM("msm-pcm-routing")));
+
+SND_SOC_DAILINK_DEFS(sen_mi2s_tx_aw882xx,
+	DAILINK_COMP_ARRAY(COMP_CPU("msm-dai-q6-mi2s.11")),
+	DAILINK_COMP_ARRAY(COMP_CODEC("aw882xx_codec", "aw882xx-aif")),
+	DAILINK_COMP_ARRAY(COMP_PLATFORM("msm-pcm-routing")));
+
+SND_SOC_DAILINK_DEFS(pri_mi2s_rx_stereo_aw882xx,
+        DAILINK_COMP_ARRAY(COMP_CPU("msm-dai-q6-mi2s.0")),
+        DAILINK_COMP_ARRAY(COMP_CODEC("aw882xxacf_smartpa.3-0034", "aw882xx-aif-3-34"),
+                           COMP_CODEC("aw882xxacf_smartpa.3-0035", "aw882xx-aif-3-35")),
+        DAILINK_COMP_ARRAY(COMP_PLATFORM("msm-pcm-routing")));
+
+SND_SOC_DAILINK_DEFS(pri_mi2s_tx_stereo_aw882xx,
+        DAILINK_COMP_ARRAY(COMP_CPU("msm-dai-q6-mi2s.1")),
+        DAILINK_COMP_ARRAY(COMP_CODEC("aw882xxacf_smartpa.3-0034", "aw882xx-aif-3-34"),
+                           COMP_CODEC("aw882xxacf_smartpa.3-0035", "aw882xx-aif-3-35")),
+        DAILINK_COMP_ARRAY(COMP_PLATFORM("msm-pcm-routing")));
+
+SND_SOC_DAILINK_DEFS(sen_mi2s_rx_stereo_aw882xx,
+	DAILINK_COMP_ARRAY(COMP_CPU("msm-dai-q6-mi2s.10")),
+	DAILINK_COMP_ARRAY(COMP_CODEC("aw882xxacf_smartpa.0-0034", "aw882xx-aif-0-34"),
+			   COMP_CODEC("aw882xxacf_smartpa.0-0035", "aw882xx-aif-0-35")),
+	DAILINK_COMP_ARRAY(COMP_PLATFORM("msm-pcm-routing")));
+
+SND_SOC_DAILINK_DEFS(sen_mi2s_tx_stereo_aw882xx,
+	DAILINK_COMP_ARRAY(COMP_CPU("msm-dai-q6-mi2s.11")),
+	DAILINK_COMP_ARRAY(COMP_CODEC("aw882xxacf_smartpa.0-0034", "aw882xx-aif-0-34"),
+			   COMP_CODEC("aw882xxacf_smartpa.0-0035", "aw882xx-aif-0-35")),
+	DAILINK_COMP_ARRAY(COMP_PLATFORM("msm-pcm-routing")));
+
