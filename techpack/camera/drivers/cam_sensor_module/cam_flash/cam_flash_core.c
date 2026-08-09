@@ -9,6 +9,9 @@
 #include "cam_sensor_cmn_header.h"
 #include "cam_flash_core.h"
 #include "cam_res_mgr_api.h"
+#ifdef CONFIG_CAMERA_FLASH_PWM
+#include "../cam_flash_pm6125_gpio/pm6125_flash_gpio.h"
+#endif
 #include "cam_common_util.h"
 #include "cam_packet_util.h"
 #include <linux/math64.h>
@@ -461,6 +464,10 @@ static int cam_flash_ops(struct cam_flash_ctrl *flash_ctrl,
 int cam_flash_off(struct cam_flash_ctrl *flash_ctrl)
 {
 	int rc = 0;
+#ifdef CONFIG_CAMERA_FLASH_PWM
+	struct cam_hw_soc_info soc_info;
+	struct cam_flash_private_soc *soc_private;
+#endif
 
 	if (!flash_ctrl) {
 		CAM_ERR(CAM_FLASH, "Flash control Null");
@@ -480,6 +487,15 @@ int cam_flash_off(struct cam_flash_ctrl *flash_ctrl)
 			"cannot apply streamoff settings");
 		}
 	}
+#ifdef CONFIG_CAMERA_FLASH_PWM
+	soc_info = flash_ctrl->soc_info;
+	soc_private = (struct cam_flash_private_soc *)soc_info.soc_private;
+	CAM_DBG(CAM_SENSOR, "cam_flash_off");
+	cam_res_mgr_gpio_set_value(soc_private->flash_gpio_enable, 0);
+	cam_res_mgr_gpio_free(soc_info.dev, soc_private->flash_gpio_enable);
+	pm6125_flash_gpio_select_state(PM6125_FLASH_GPIO_STATE_SUSPEND,
+		CAMERA_SENSOR_FLASH_OP_OFF, 0);
+#endif
 	return 0;
 }
 
@@ -488,6 +504,11 @@ static int cam_flash_low(
 	struct cam_flash_frame_setting *flash_data)
 {
 	int i = 0, rc = 0;
+#ifdef CONFIG_CAMERA_FLASH_PWM
+	struct cam_hw_soc_info soc_info = flash_ctrl->soc_info;
+	struct cam_flash_private_soc *soc_private =
+		(struct cam_flash_private_soc *)soc_info.soc_private;
+#endif
 
 	if (!flash_data) {
 		CAM_ERR(CAM_FLASH, "Flash Data Null");
@@ -505,6 +526,25 @@ static int cam_flash_low(
 	if (rc)
 		CAM_ERR(CAM_FLASH, "Fire Torch failed: %d", rc);
 
+#ifdef CONFIG_CAMERA_FLASH_PWM
+	CAM_DBG(CAM_FLASH,
+		"Flash low Triggered flash_data->led_current_ma[0] = %u",
+		flash_data->led_current_ma[0]);
+	rc = cam_res_mgr_gpio_request(soc_info.dev,
+		soc_private->flash_gpio_enable, 0, "CUSTOM_GPIO1");
+	if (rc) {
+		CAM_ERR(CAM_FLASH, "gpio %d request fails",
+			soc_private->flash_gpio_enable);
+		return rc;
+	}
+	cam_res_mgr_gpio_set_value(soc_private->flash_gpio_enable, 0);
+	pm6125_flash_gpio_select_state(PM6125_FLASH_GPIO_STATE_ACTIVE,
+		CAMERA_SENSOR_FLASH_OP_FIRELOW, FLASH_FIRE_LOW_MAXCURRENT);
+	usleep_range(5000, 6000);
+	pm6125_flash_gpio_select_state(PM6125_FLASH_GPIO_STATE_ACTIVE,
+		CAMERA_SENSOR_FLASH_OP_FIRELOW, flash_data->led_current_ma[0]);
+#endif
+
 	return rc;
 }
 
@@ -513,6 +553,11 @@ static int cam_flash_high(
 	struct cam_flash_frame_setting *flash_data)
 {
 	int i = 0, rc = 0;
+#ifdef CONFIG_CAMERA_FLASH_PWM
+	struct cam_hw_soc_info soc_info = flash_ctrl->soc_info;
+	struct cam_flash_private_soc *soc_private =
+		(struct cam_flash_private_soc *)soc_info.soc_private;
+#endif
 
 	if (!flash_data) {
 		CAM_ERR(CAM_FLASH, "Flash Data Null");
@@ -529,6 +574,22 @@ static int cam_flash_high(
 		CAMERA_SENSOR_FLASH_OP_FIREHIGH);
 	if (rc)
 		CAM_ERR(CAM_FLASH, "Fire Flash Failed: %d", rc);
+
+#ifdef CONFIG_CAMERA_FLASH_PWM
+	CAM_DBG(CAM_FLASH,
+		"Flash high Triggered flash_data->led_current_ma[0] = %u",
+		flash_data->led_current_ma[0]);
+	rc = cam_res_mgr_gpio_request(soc_info.dev,
+		soc_private->flash_gpio_enable, 0, "CUSTOM_GPIO1");
+	if (rc) {
+		CAM_ERR(CAM_FLASH, "gpio %d request fails",
+			soc_private->flash_gpio_enable);
+		return rc;
+	}
+	cam_res_mgr_gpio_set_value(soc_private->flash_gpio_enable, 1);
+	pm6125_flash_gpio_select_state(PM6125_FLASH_GPIO_STATE_ACTIVE,
+		CAMERA_SENSOR_FLASH_OP_FIREHIGH, flash_data->led_current_ma[0]);
+#endif
 
 	return rc;
 }

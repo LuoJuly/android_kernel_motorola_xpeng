@@ -8,6 +8,9 @@
 #include "cam_flash_soc.h"
 #include "cam_flash_core.h"
 #include "cam_common_util.h"
+#ifdef CONFIG_CAMERA_FLASH_PWM
+#include "pm6125_flash_gpio.h"
+#endif
 #include "camera_main.h"
 
 static int32_t cam_flash_driver_cmd(struct cam_flash_ctrl *fctrl,
@@ -142,6 +145,10 @@ static int32_t cam_flash_driver_cmd(struct cam_flash_ctrl *fctrl,
 		CAM_DBG(CAM_FLASH, "CAM_QUERY_CAP");
 		flash_cap.slot_info  = fctrl->soc_info.index;
 		flash_cap.flash_type = soc_private->flash_type;
+#ifdef CONFIG_CAMERA_FLASH_PWM
+		CAM_DBG(CAM_FLASH, "get flash_enable_gpio %d",
+			soc_private->flash_gpio_enable);
+#endif
 		for (i = 0; i < fctrl->flash_num_sources; i++) {
 			flash_cap.max_current_flash[i] =
 				soc_private->flash_max_current[i];
@@ -440,6 +447,9 @@ static int cam_flash_component_bind(struct device *dev,
 	fctrl->soc_info.dev_name = pdev->name;
 
 	platform_set_drvdata(pdev, fctrl);
+#ifdef CONFIG_CAMERA_FLASH_PWM
+	dev_set_drvdata(&pdev->dev, fctrl);
+#endif
 
 	rc = cam_flash_get_dt_data(fctrl, &fctrl->soc_info);
 	if (rc) {
@@ -539,6 +549,9 @@ static int cam_flash_component_bind(struct device *dev,
 
 	fctrl->flash_state = CAM_FLASH_STATE_INIT;
 	CAM_DBG(CAM_FLASH, "Component bound successfully");
+#ifdef CONFIG_CAMERA_FLASH_PWM
+	pm6125_flash_control_create_device(&pdev->dev);
+#endif
 	return rc;
 
 free_cci_resource:
@@ -561,6 +574,10 @@ static void cam_flash_component_unbind(struct device *dev,
 	struct cam_flash_ctrl *fctrl;
 	struct platform_device *pdev = to_platform_device(dev);
 
+#ifdef CONFIG_CAMERA_FLASH_PWM
+	pm6125_flash_control_remove_device(&pdev->dev);
+#endif
+
 	fctrl = platform_get_drvdata(pdev);
 	if (!fctrl) {
 		CAM_ERR(CAM_FLASH, "Flash device is NULL");
@@ -573,6 +590,9 @@ static void cam_flash_component_unbind(struct device *dev,
 	cam_unregister_subdev(&(fctrl->v4l2_dev_str));
 	cam_flash_put_source_node_data(fctrl);
 	platform_set_drvdata(pdev, NULL);
+#ifdef CONFIG_CAMERA_FLASH_PWM
+	dev_set_drvdata(&pdev->dev, NULL);
+#endif
 	v4l2_set_subdevdata(&fctrl->v4l2_dev_str.sd, NULL);
 	kfree(fctrl);
 	CAM_INFO(CAM_FLASH, "Flash Sensor component unbind");

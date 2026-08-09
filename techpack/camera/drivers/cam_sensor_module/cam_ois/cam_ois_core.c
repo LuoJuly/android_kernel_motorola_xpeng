@@ -16,6 +16,11 @@
 #include "cam_common_util.h"
 #include "cam_packet_util.h"
 
+extern int dw9781c_check_fw_download(struct camera_io_master *io_master_info,
+	const uint8_t *fwData, uint32_t fwSize);
+extern void dw9781_post_firmware_download(struct camera_io_master *io_master_info,
+	const uint8_t *fwData, uint32_t fwSize);
+
 int32_t cam_ois_construct_default_power_setting(
 	struct cam_sensor_power_ctrl_t *power_info)
 {
@@ -389,6 +394,16 @@ static int cam_ois_fw_download(struct cam_ois_ctrl_t *o_ctrl)
 		return rc;
 	}
 
+	if (strstr(o_ctrl->ois_name, "dw9781")) {
+		if (!dw9781c_check_fw_download(&(o_ctrl->io_master_info),
+				fw->data, fw->size)) {
+			CAM_INFO(CAM_OIS, "Skip firmware download.");
+			release_firmware(fw);
+			return 0;
+		}
+		CAM_INFO(CAM_OIS, "Firmware download started.");
+	}
+
 	total_bytes = fw->size;
 	i2c_reg_setting.addr_type = CAMERA_SENSOR_I2C_TYPE_BYTE;
 	i2c_reg_setting.data_type = CAMERA_SENSOR_I2C_TYPE_BYTE;
@@ -421,6 +436,17 @@ static int cam_ois_fw_download(struct cam_ois_ctrl_t *o_ctrl)
 		CAM_ERR(CAM_OIS, "OIS FW download failed %d", rc);
 		goto release_firmware;
 	}
+
+	if (strstr(o_ctrl->ois_name, "dw9781")) {
+		dw9781_post_firmware_download(&(o_ctrl->io_master_info),
+			fw->data, fw->size);
+		vfree(vaddr);
+		vaddr = NULL;
+		fw_size = 0;
+		release_firmware(fw);
+		return 0;
+	}
+
 	vfree(vaddr);
 	vaddr = NULL;
 	fw_size = 0;
